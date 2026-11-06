@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 from pathlib import Path
 import subprocess
@@ -55,7 +56,7 @@ class GatewayTests(unittest.TestCase):
         tools = result['result']['tools']
         self.assertEqual(len(tools), 1)
         name = tools[0]['name']
-        self.assertTrue(name.endswith('__echo'))
+        self.assertEqual(name,'fixture__echo')
         call = self.gateway.handle('cursor', {'id': 2, 'method': 'tools/call', 'params': {'name': name, 'arguments': {'text': 'hello'}}})
         self.assertEqual(call['result']['content'][0]['text'], 'hello')
         denied = self.gateway.handle('codex', {'id': 3, 'method': 'tools/call', 'params': {'name': name, 'arguments': {}}})
@@ -63,6 +64,28 @@ class GatewayTests(unittest.TestCase):
         self.store.update(self.server['id'], {'clients': []})
         revoked = self.gateway.handle('cursor', {'id': 4, 'method': 'tools/call', 'params': {'name': name, 'arguments': {}}})
         self.assertIn('error', revoked)
+    def test_colliding_readable_names_route_to_the_right_upstream_after_restart(self):
+        other=copy.deepcopy(self.server)
+        other.update(id='zz-other',name='Fixture',source_client='manager',source_name='Fixture',
+                     definition={'command':'/usr/bin/env','args':[sys.executable,FIXTURE],'env':{'METHOD_MARKER':str(self.root/'other-requests')}})
+        other.pop('common_key',None)
+        self.store.data['servers'].append(other);self.store.save()
+        listed=self.gateway.handle('cursor',{'id':1,'method':'tools/list'})
+        names=[tool['name'] for tool in listed['result']['tools']]
+        self.assertIn('fixture__echo',names);self.assertIn('fixture_2__echo',names)
+        before=self.marker.read_text()
+        call=self.gateway.handle('cursor',{'id':2,'method':'tools/call','params':{'name':'fixture_2__echo','arguments':{'text':'correct server'}}})
+        self.assertEqual(call['result']['content'][0]['text'],'correct server')
+        self.assertEqual(self.marker.read_text(),before)
+        self.assertEqual((self.root/'other-requests').read_text().splitlines()[-1],'tools/call')
+        self.gateway.close()
+        self.store=Store(self.store.root,self.home);self.gateway=Gateway(self.store)
+        again=self.gateway.handle('cursor',{'id':3,'method':'tools/list'})
+        self.assertEqual([tool['name'] for tool in again['result']['tools']],names)
+        self.store.update(other['id'],{'clients':[]})
+        denied=self.gateway.handle('cursor',{'id':4,'method':'tools/call','params':{'name':'fixture_2__echo','arguments':{}}})
+        self.assertIn('error',denied)
+
     def test_disabling_direct_entry_keeps_imported_gateway_available(self):
         path = self.home / '.cursor/mcp.json'
         doc = json.loads(path.read_text())

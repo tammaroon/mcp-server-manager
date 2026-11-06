@@ -10,9 +10,7 @@ import SwiftUI
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let model = try exampleModel()
         try capture(ManagerView(model: model), size: NSSize(width: 1180, height: 900), to: output.appendingPathComponent("manager.png"))
-        try capture(MenuPopoverView(model: model, openManager: {}, quit: {})
-            .clipShape(RoundedRectangle(cornerRadius: 12)),
-            size: MenuBarPresentation.preferredSize, to: output.appendingPathComponent("menu.png"))
+        // The README menu image is a user-supplied capture; leave it intact.
         print("Saved example-data screenshots to \(output.path)")
     }
 

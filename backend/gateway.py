@@ -23,20 +23,12 @@ from oauth import OAuthManager
 from common_config import CommonConfig
 from credentials import FileCredentials
 from server_config import all_refs, raw_config
+from tool_names import ToolNames
 
 
 def socket_path(state):
     identity = hashlib.sha256(str(Path(state).resolve()).encode()).hexdigest()[:12]
     return Path('/tmp') / f'mcp-manager-{os.getuid()}-{identity}' / 'gateway.sock'
-
-
-def tool_name(server, original):
-    slug = re.sub(r'[^A-Za-z0-9_-]', '_', server['name'])[:18]
-    prefix = slug + '_' + server['id'][:8] + '__'
-    safe = re.sub(r'[^A-Za-z0-9_-]', '_', original)
-    if safe != original or len(prefix + safe) > 64:
-        safe = safe[:max(1, 64 - len(prefix) - 9)] + '_' + hashlib.sha256(original.encode()).hexdigest()[:8]
-    return prefix + safe
 
 
 class Gateway:
@@ -49,6 +41,7 @@ class Gateway:
         self.closing = threading.Event()
         self.started = time.time()
         self.last_checked = None
+        self.names = ToolNames(store)
         self.credentials = FileCredentials(store)
         self.common = CommonConfig(store, self.credentials.write, self.credentials.delete)
         self.common_error = None
@@ -192,11 +185,12 @@ class Gateway:
                         if not self._permitted(server, client): continue
                         try:
                             entry = self._session(server)
+                            aliases = self.names.register(server, [tool['name'] for tool in entry['tools']])
                             for tool in entry['tools']:
                                 if self._permitted(server, client, tool['name']):
                                     tool = copy.deepcopy(tool)
                                     tool['description'] = '[' + server['name'] + '] ' + tool.get('description', '')
-                                    tool['name'] = tool_name(server, tool['name'])
+                                    tool['name'] = aliases[tool['name']]
                                     tools.append(tool)
                         except ManagerError:
                             self.check(server['id'])
@@ -206,26 +200,23 @@ class Gateway:
                 name = params.get('name')
                 arguments = params.get('arguments', {})
                 if not isinstance(name, str) or not isinstance(arguments, dict): raise ManagerError('Invalid tool call.')
-                result = None
-                for server in list(self.store.data['servers']):
-                    if not self._permitted(server, client): continue
-                    # Prefix limits session creation to the matching upstream.
-                    if not name.startswith(tool_name(server, '').rsplit('__', 1)[0] + '__'): continue
-                    with self._server_lock(server['id']):
-                        try: server = self.store.server(server['id'])
-                        except ManagerError: continue
-                        if not self._permitted(server, client): continue
-                        entry = self._session(server)
-                        original = next((t['name'] for t in entry['tools'] if tool_name(server, t['name']) == name), None)
-                        if original is None or not self._permitted(self.store.server(server['id']), client, original): raise ManagerError('Tool is unavailable or access was revoked.')
-                        entry['session'].timeout = 60
-                        try: result = entry['session'].request('tools/call', {'name': original, 'arguments': arguments})
-                        except Exception:
-                            self.restart(server['id'])
-                            raise
-                        finally: entry['session'].timeout = 10 if server['transport'] == 'HTTP' else 8
-                        break
-                if result is None: raise ManagerError('Tool is unavailable or this client is not allowed to use it.')
+                route = self.names.resolve(name)
+                if route is None: raise ManagerError('Tool is unavailable or this client is not allowed to use it.')
+                sid, original = route
+                with self._server_lock(sid):
+                    try: server = self.store.server(sid)
+                    except ManagerError: raise ManagerError('Tool is unavailable.') from None
+                    if not self._permitted(server, client, original): raise ManagerError('Tool is unavailable or access was revoked.')
+                    entry = self._session(server)
+                    if not any(tool['name'] == original for tool in entry['tools']): raise ManagerError('Tool is unavailable.')
+                    if not self._permitted(self.store.server(sid), client, original): raise ManagerError('Tool is unavailable or access was revoked.')
+                    entry['session'].timeout = 60
+                    try: result = entry['session'].request('tools/call', {'name': original, 'arguments': arguments})
+                    except Exception:
+                        self.restart(sid)
+                        raise
+                    finally: entry['session'].timeout = 10 if server['transport'] == 'HTTP' else 8
+
             else:
                 response['error'] = {'code': -32601, 'message': 'Method not supported by this tools-only gateway.'}
                 return response

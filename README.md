@@ -5,6 +5,7 @@ A central place to manage MCP servers on macOS. Configure your servers once and 
 - Manage local stdio and remote HTTP servers.
 - Edit server configuration, sign in, and check connection status.
 - Choose which clients can access each server and its tools.
+- Use readable names such as `jira__search_issues`; stable numeric suffixes resolve naming collisions.
 - Keep connections handy from the menu bar, with optional startup at login.
 
 ## Screenshots
@@ -17,7 +18,7 @@ A central place to manage MCP servers on macOS. Configure your servers once and 
 
 <img src="docs/screenshots/menu.png" alt="MCP Server Manager menu" width="468">
 
-Screenshots use example server data.
+The manager screenshot uses example server data.
 
 ## Build and run
 
@@ -40,4 +41,4 @@ python3 -m unittest discover -s tests -v
 python3 scripts/smoke.py
 ```
 
-Regenerate the example screenshots with `./scripts/capture-screenshots.sh`.
+Regenerate the example manager screenshot with `./scripts/capture-screenshots.sh`.
