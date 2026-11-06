@@ -1,0 +1,16 @@
+.build/
+build/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+*.log
+
+# Local design notes and machine-specific migration utilities.
+/Design.md
+/Menu Bar Preview.html
+/docs/implementation-status.md
+/docs/superpowers/
+/scripts/migrate-codex-to-manager.py
+/scripts/verify-manager-bridge.py
