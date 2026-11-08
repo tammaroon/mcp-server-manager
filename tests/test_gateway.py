@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from catalog import Store, ManagerError
 from transport import StdioSession, HTTPSession
 from gateway import Gateway, rpc, socket_path
+from server_config import editor_config,save_editor_config
 
 FIXTURE = str(Path(__file__).parent / 'fixtures/upstream.py')
 BACKEND = str(Path(__file__).resolve().parents[1] / 'backend/manager.py')
@@ -224,7 +225,7 @@ class HTTPTests(unittest.TestCase):
             with self.assertRaises(ManagerError): s.initialize()
         finally: s.close()
         self.assertEqual(len(self.requests), 1)
-    def test_common_file_replacement_overrides_source_token_environment(self):
+    def test_common_file_header_can_replace_source_environment_auth(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             config = root / '.cursor/mcp.json'
@@ -235,7 +236,9 @@ class HTTPTests(unittest.TestCase):
             server = store.data['servers'][0]
             gateway = Gateway(store)
             try:
-                gateway.common.set_credential(server['id'], 'replacement')
+                view=editor_config(store,server)
+                definition={'url':self.base+'/mcp','http_headers':{'Authorization':'Bearer replacement'}}
+                save_editor_config(store,server,json.dumps(definition),view['revision'])
                 with patch.dict(os.environ, {'OLD_TOKEN': 'old-token', 'OLD_HEADER': 'Bearer old-header'}):
                     self.assertEqual(gateway.check(server['id'])['status'], 'reachable')
                 headers = {k.lower():v for k,v in self.requests[0][1].items()}
@@ -249,7 +252,9 @@ class HTTPTests(unittest.TestCase):
             store=Store(root/'state',root);store.rescan();gateway=Gateway(store)
             try:
                 server=store.data['servers'][0]
-                gateway.common.set_credential(server['id'],'replacement')
+                view=editor_config(store,server);definition=json.loads(view['config_json'])
+                definition['http_headers']['Authorization']='Bearer replacement'
+                save_editor_config(store,server,json.dumps(definition),view['revision'])
                 self.assertEqual(gateway.check(server['id'])['status'],'reachable')
                 self.assertEqual({k.lower():v for k,v in self.requests[0][1].items()}['authorization'],'Bearer replacement')
             finally:gateway.close()

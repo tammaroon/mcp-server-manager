@@ -1,4 +1,4 @@
-"""Editable manager-owned MCP entries with opaque source/file credential references."""
+"""Editable per-server MCP JSON and legacy credential-reference migration."""
 from __future__ import annotations
 import copy
 import hashlib
@@ -174,7 +174,7 @@ def validate(config):
     if config.get('url') and config.get('type') == 'stdio' or config.get('command') and config.get('type') in ('http', 'streamable-http'): raise ManagerError('Transport type does not match the url or command.')
 
 
-def save_editor_config(store, server, text, revision, write_secret=None, delete_secret=None):
+def save_editor_config(store, server, text, revision):
     if not isinstance(text, str) or len(text.encode()) > 512 * 1024: raise ManagerError('Configuration must be JSON text under 512 KB.')
     try: config = json.loads(text, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
     except json.JSONDecodeError as e: raise ManagerError(f'Invalid JSON at line {e.lineno}, column {e.colno}.') from None
@@ -185,7 +185,7 @@ def save_editor_config(store, server, text, revision, write_secret=None, delete_
     CommonConfig(store).save_server(server['id'], config, revision)
 
 
-def resolve_config(store, server, read_secret=None):
+def resolve_config(store, server):
     config = raw_config(store, server)
     if all_refs(config):
         from credentials import read_document

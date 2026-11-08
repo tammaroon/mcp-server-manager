@@ -1,5 +1,4 @@
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
-import manager as m
+import catalog as m
 
 
 class CatalogFixture:

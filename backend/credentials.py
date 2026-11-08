@@ -6,14 +6,14 @@ import json
 import os
 from pathlib import Path
 import threading
-from catalog import ManagerError, atomic_write
+from catalog import ManagerError
 
 _locks = {}
 _guard = threading.Lock()
 
 @contextmanager
 def file_lock(path):
-    """Coordinate backend and native credential edits, including nested calls."""
+    """Serialize common configuration edits, including nested calls."""
     path = Path(path)
     with _guard:
         lock, local = _locks.setdefault(str(path.resolve()), (threading.RLock(), threading.local()))
@@ -92,14 +92,3 @@ class FileCredentials:
         with self.store.lock:
             server = self.store.server(sid)
             CommonConfig(self.store).save_oauth(sid, {**server.get('oauth', {}), **bundle})
-
-    def delete(self, account):
-        if not account.startswith('oauth:'): raise ManagerError('Remove credentials directly from the server configuration.')
-        from common_config import CommonConfig
-        from server_config import editor_config
-        with self.store.lock, file_lock(self.path):
-            server = self.store.server(account[len('oauth:'):])
-            view = editor_config(self.store, server)
-            config = json.loads(view['config_json'])
-            config.pop('oauth',None)
-            CommonConfig(self.store).save_server(server['id'], config, view['revision'])

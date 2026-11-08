@@ -82,7 +82,9 @@ class DeleteServerTests(unittest.TestCase):
         self.assertEqual(self.gateway.common.path.read_bytes(),file_before)
     def test_delete_preserves_credentials_in_other_server_entry(self):
         other=next(s for s in self.store.data['servers'] if s['id']!=self.server['id'])
-        self.gateway.common.set_credential(other['id'],'other-secret')
+        view=editor_config(self.store,other);config=json.loads(view['config_json'])
+        config['http_headers']={'Authorization':'Bearer other-secret'}
+        save_editor_config(self.store,other,json.dumps(config),view['revision'])
         self.delete(confirmed=True)
         self.assertEqual(self.store.resolve(other)['http_headers']['Authorization'],'Bearer other-secret')
         self.assertEqual(set(json.loads(self.gateway.common.path.read_text())),{'mcpServers'})

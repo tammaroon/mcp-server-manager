@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from catalog import Store, ManagerError
 from credentials import FileCredentials
 from oauth import OAuthManager
+from server_config import editor_config,save_editor_config
 
 
 class OAuthTests(unittest.TestCase):
@@ -135,7 +136,9 @@ class OAuthTests(unittest.TestCase):
 
     def test_login_can_restart_when_previous_file_credential_is_missing(self):
         started=self.oauth.start(self.server);self.callback(started)
-        self.credentials.delete('oauth:'+self.server['id'])
+        view=editor_config(self.store,self.server);config=json.loads(view['config_json'])
+        config.pop('oauth')
+        save_editor_config(self.store,self.server,json.dumps(config),view['revision'])
         next_login=self.oauth.start(self.server)
         self.assertTrue(next_login['authorization_url'])
         self.assertEqual(self.server['oauth']['status'],'pending')

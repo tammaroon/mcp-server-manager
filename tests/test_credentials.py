@@ -8,6 +8,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 from catalog import Store,ManagerError
 from credentials import FileCredentials
 from gateway import Gateway
+from server_config import editor_config,save_editor_config
 
 class FileCredentialTests(unittest.TestCase):
     def setUp(self):
@@ -30,7 +31,9 @@ class FileCredentialTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.gateway.common.path.stat().st_mode),0o600)
     def test_removing_oauth_keeps_server_and_other_fields(self):
         self.credentials.write(self.account,json.dumps({'access_token':'access-secret','refresh_token':'refresh-secret'}))
-        self.credentials.delete(self.account)
+        view=editor_config(self.store,self.server);config=json.loads(view['config_json'])
+        config.pop('oauth')
+        save_editor_config(self.store,self.server,json.dumps(config),view['revision'])
         doc=json.loads(self.gateway.common.path.read_text())
         self.assertEqual(doc['mcpServers']['fixture']['url'],'https://example.test/mcp')
         self.assertNotIn('oauth',doc['mcpServers']['fixture'])

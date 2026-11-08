@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import signal
 import socket
 import socketserver
@@ -22,7 +21,7 @@ from transport import HTTPSession, StdioSession, MAX_MESSAGE, PROTOCOLS
 from oauth import OAuthManager
 from common_config import CommonConfig
 from credentials import FileCredentials
-from server_config import all_refs, raw_config
+from server_config import raw_config
 from tool_names import ToolNames
 
 
@@ -43,7 +42,7 @@ class Gateway:
         self.last_checked = None
         self.names = ToolNames(store)
         self.credentials = FileCredentials(store)
-        self.common = CommonConfig(store, self.credentials.write, self.credentials.delete)
+        self.common = CommonConfig(store)
         self.common_error = None
         self.oauth = OAuthManager(store, self.credentials.read, self.credentials.write, self._oauth_changed)
         self._sync_common()
@@ -242,7 +241,7 @@ class Gateway:
             with self._server_lock(sid):
                 server = self.store.server(sid)
                 if action == 'server_config': return editor_config(self.store, server)
-                save_editor_config(self.store, server, request.get('config_json'), request.get('revision'), self.credentials.write, self.credentials.delete)
+                save_editor_config(self.store, server, request.get('config_json'), request.get('revision'))
                 self.restart(sid)
             return self.snapshot()
         if action == 'delete':
@@ -282,23 +281,6 @@ class Gateway:
             if interval not in (0, 300, 900, 1800, 3600): raise ManagerError('Unsupported check interval.')
             self.store.data['settings']['check_interval'] = interval
             self.store.save()
-            return self.snapshot()
-        if action in ('credential_saved', 'credential_set'):
-            sid = request['server_id']
-            header = request.get('header', 'Authorization')
-            if not re.fullmatch(r'[A-Za-z0-9-]{1,80}', header): raise ManagerError('Invalid credential header name.')
-            with self._server_lock(sid):
-                server = self.store.server(sid)
-                if server['transport'] != 'HTTP': raise ManagerError('Credentials are currently supported for HTTP upstreams.')
-                if action == 'credential_set':
-                    secret = request.get('secret') if request.get('present',True) else None
-                    if secret is not None and (not isinstance(secret,str) or not secret or len(secret)>512*1024): raise ManagerError('Enter a credential value.')
-                    if request.get('present',True) and secret is None: raise ManagerError('Enter a credential value.')
-                    self.common.set_credential(sid, secret, header)
-                server = self.store.server(sid)
-                server.update(credential_set=False, credential_header=header, status='not_checked')
-                self.restart(sid)
-                self.store.save()
             return self.snapshot()
         if action == 'add':
             name = request.get('name', '').strip()

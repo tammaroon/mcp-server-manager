@@ -186,12 +186,6 @@ enum Backend {
             } catch { self.error = error.localizedDescription; busy = false }
         }
     }
-    func saveCredential(_ server: Server, secret: String, header: String) {
-        perform("credential_set", values: ["server_id": server.id, "secret": secret, "header": header], label: "Saving credential to common configuration…")
-    }
-    func removeCredential(_ server: Server) {
-        perform("credential_set", values: ["server_id": server.id, "present": false], label: "Removing credential from common configuration…")
-    }
     func setLogin(_ enabled: Bool) {
         do {
             if enabled { try SMAppService.mainApp.register() }
@@ -242,5 +236,4 @@ enum Backend {
             }
         }
     }
-    func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
 }

@@ -20,8 +20,6 @@ struct Server: Decodable, Identifiable {
     var clients: [String]
     var tool_allowlists: [String: [String]]
     var auth: String
-    var credential_set: Bool
-    var credential_header: String
     var status: String
     var last_checked: Double?
     var duration_ms: Int?
@@ -91,10 +89,7 @@ struct Client: Decodable, Identifiable {
     }
 }
 struct DaemonState: Decodable {
-    var status: String
-    var started: Double
     var last_checked: Double?
-    var socket: String
     var bridge_count: Int
 }
 struct ManagerSettings: Decodable { var check_interval: Int }
@@ -104,8 +99,6 @@ struct Snapshot: Decodable {
     var errors: [String]
     var settings: ManagerSettings
     var daemon: DaemonState
-    var version: String
-    var common_config_path: String?
 }
 struct ConfigReview: Decodable, Identifiable {
     var client: String

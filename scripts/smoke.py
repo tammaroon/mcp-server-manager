@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the packaged bridge/daemon with disposable local fixtures only."""
 import json
-import os
 from pathlib import Path
 import selectors
 import subprocess

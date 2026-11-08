@@ -304,11 +304,10 @@ class Store:
 
     def resolve(self, server):
         from server_config import resolve_config
-        from credentials import FileCredentials
         if 'definition' not in server and self.server(server['id'])['source_client'] != 'manager':
             config = definitions(self.home, server['source_client']).get(server['source_name'])
             if not isinstance(config, dict): raise ManagerError('Original configuration was removed.')
-        return resolve_config(self, server, FileCredentials(self).read)
+        return resolve_config(self, server)
 
 
 class ConfigAdapter:

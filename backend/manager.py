@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """CLI entry point. stdout contains JSON only; bridge mode contains MCP only."""
+import json
+from pathlib import Path
 import sys
 sys.dont_write_bytecode = True
-from catalog import *
+from catalog import CLIENTS, ManagerError, redact
 
 
 def main():
     import argparse
-    import sys
     from gateway import ensure_daemon, rpc, run_bridge, run_daemon
     parser = argparse.ArgumentParser(description='MCP Server Manager local gateway')
     parser.add_argument('--state', type=Path, default=Path.home() / 'Library/Application Support/MCP Server Manager')

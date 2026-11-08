@@ -1,7 +1,6 @@
 """MCP OAuth discovery and native browser sign-in with PKCE and a loopback callback."""
 from __future__ import annotations
 import base64
-import copy
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
@@ -16,7 +15,7 @@ import urllib.parse
 import urllib.request
 from catalog import ManagerError
 from transport import deadline_opener
-from server_config import editor_config, raw_config, resolve_config
+from server_config import raw_config, resolve_config
 
 
 def origin(url):
@@ -118,7 +117,7 @@ class OAuthManager:
         # Discover/restart login without reading a missing or expired Authorization secret.
         endpoint=raw_config(self.store,server).get('url')
         projection={**server,'definition':{'url':endpoint},'credential_set':False}
-        return resolve_config(self.store,projection,self.read_secret).get('url')
+        return resolve_config(self.store,projection).get('url')
 
     def start(self,server):
         sid=server['id']

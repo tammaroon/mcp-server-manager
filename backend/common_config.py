@@ -10,7 +10,7 @@ from server_config import all_refs, digest, inline_legacy_config, safe_definitio
 
 
 class CommonConfig:
-    def __init__(self, store, write_secret=None, delete_secret=None):
+    def __init__(self, store):
         self.store = store
         self.path = Path(store.root) / 'mcp.json'
         self.lock = threading.RLock()
@@ -150,21 +150,6 @@ class CommonConfig:
             for index, record in enumerate(staged['servers']):
                 if record['id'] == sid: staged['servers'][index] = self._mirror(record, config, key, reset=True)
             self._commit(staged, document, original)
-
-    def set_credential(self, sid, value, header='Authorization'):
-        with self.store.lock, self.lock, file_lock(self.path):
-            self._sync_locked()
-            server = self.store.server(sid)
-            document, _ = read_document(self.path)
-            config = document['mcpServers'][server['common_key']]
-            revision = digest(config)
-            for field in ('headers','http_headers','env_http_headers'):
-                if field in config: config[field] = {k:v for k,v in config[field].items() if k.lower()!=header.lower()}
-            if header.lower() == 'authorization': config.pop('bearer_token_env_var', None)
-            if value is not None:
-                if header.lower() == 'authorization' and not value.lower().startswith(('bearer ','basic ')): value = 'Bearer ' + value
-                config.setdefault('http_headers',config.pop('headers',{}))[header] = value
-            self.save_server(sid, config, revision)
 
     def save_oauth(self, sid, bundle):
         with self.store.lock, self.lock, file_lock(self.path):

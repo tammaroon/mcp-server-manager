@@ -27,7 +27,7 @@ class InlineConfigTests(unittest.TestCase):
     def test_save_and_external_edit_survive_restart_without_credential_references(self):
         self.gateway.snapshot();view=editor_config(self.store,self.server)
         config=json.loads(view['config_json']);config['http_headers']['Authorization']='Bearer replacement-secret'
-        save_editor_config(self.store,self.server,json.dumps(config),view['revision'],self.gateway.credentials.write,self.gateway.credentials.delete)
+        save_editor_config(self.store,self.server,json.dumps(config),view['revision'])
         doc=json.loads(self.gateway.common.path.read_text())
         self.assertNotIn('${credential:',json.dumps(doc))
         doc['mcpServers']['remote']['http_headers']['Authorization']='Bearer external-secret'
@@ -80,9 +80,6 @@ class InlineConfigTests(unittest.TestCase):
         with patch.object(self.gateway.common,'save_server',side_effect=intervening_edit):
             with self.assertRaisesRegex(ManagerError,'changed'):operation()
         self.assertEqual(json.loads(self.gateway.common.path.read_text())['mcpServers']['remote']['url'],'https://edited.example/mcp')
-
-    def test_manual_credential_save_preserves_intervening_external_edits(self):
-        self._preserve_editor_change_during(lambda:self.gateway.common.set_credential(self.server['id'],'replacement-secret'))
 
     def test_oauth_save_preserves_intervening_external_edits(self):
         self._preserve_editor_change_during(lambda:self.gateway.common.save_oauth(self.server['id'],{'access_token':'new-access','refresh_token':'new-refresh'}))
