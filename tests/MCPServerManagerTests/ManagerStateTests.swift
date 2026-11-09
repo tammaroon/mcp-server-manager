@@ -21,7 +21,11 @@ import Foundation
             ("jira", "disabled", "HTTP", true, false),
             ("jira", "failed", "HTTP", false, false),
             ("local", "failed", "stdio", true, false),
-            ("webexapis", "auth_required", "HTTP", nil, true)
+            ("webexapis", "auth_required", "HTTP", nil, true),
+            ("custom-remote", "auth_required", "HTTP", nil, true),
+            ("custom-remote", "failed", "HTTP", nil, true),
+            ("webexapis", "failed", "HTTP", false, false),
+            ("custom-local", "failed", "stdio", nil, false)
         ]
         for (name, status, transport, signIn, expected) in cases {
             var object = base

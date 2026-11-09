@@ -111,17 +111,18 @@ def discovery_identity(config):
     return hashlib.sha256(json.dumps(target).encode()).hexdigest()
 
 
-def internal_server(name, config):
-    normalized = re.sub(r'[^a-z0-9]', '', str(name).lower())
-    if normalized in ('noderepl', 'mcpnoderepl', 'computeruse', 'unifiedcomputeruse', 'mcpcomputeruse'):
-        return True
-    signature = re.compile(r'(?<![a-z0-9])(?:node[-_]repl|(?:unified[-_])?computer[-_]use)(?![a-z0-9])', re.I)
-    args = config.get('args', [])
-    launch = [config.get('command', '')] + (args if isinstance(args, list) else [])
-    return any(isinstance(value, str) and signature.search(value) for value in launch)
+def was_deleted(server, deleted_servers):
+    sources = {(v['client'], v['name']) for v in server.get('sources', [])}
+    for deleted in deleted_servers:
+        old_sources = {(v['client'], v['name']) for v in deleted.get('sources', [])}
+        if server['id'] == deleted['id'] or sources & old_sources:
+            return True
+        if server.get('discovery_identity') in deleted.get('identities', []):
+            return True
+    return False
 
 
-def discover(home: Path):
+def discover(home: Path, deleted_servers=()):
     servers, clients, errors = [], [], []
     equivalent = {}
     for cid, (name, rel, key, app) in CLIENTS.items():
@@ -133,15 +134,17 @@ def discover(home: Path):
             if not isinstance(entry, dict): raise ManagerError('The mcp-manager entry must be an object.')
             client['configured'] = bool(entry.get('command')) and 'bridge' in entry.get('args', []) and entry.get('enabled', True) is not False and not entry.get('disabled', False)
             for name, config in defs.items():
-                if name == 'mcp-manager' or not isinstance(config, dict) or internal_server(name, config): continue
+                if name == 'mcp-manager' or not isinstance(config, dict): continue
                 sid = hashlib.sha256(f'{cid}:{name}'.encode()).hexdigest()[:12]
+                fingerprint = discovery_identity(config)
+                source = {'client': cid, 'path': str(path), 'name': name}
+                if was_deleted({'id': sid, 'sources': [source], 'discovery_identity': fingerprint}, deleted_servers): continue
                 http = bool(config.get('url'))
                 transport = 'HTTP' if http else 'stdio'
                 supported = bool(config.get('command') or config.get('url')) and config.get('type') != 'sse'
                 headers = config.get('http_headers', config.get('headers', {}))
                 auth = 'Source credential' if headers or config.get('bearer_token_env_var') or config.get('env_http_headers') else ('Not validated' if http else 'Local process')
-                fingerprint = discovery_identity(config) or ('unsupported', cid, name)
-                source = {'client': cid, 'path': str(path), 'name': name}
+                fingerprint = fingerprint or ('unsupported', cid, name)
                 if fingerprint in equivalent:
                     existing = equivalent[fingerprint]
                     existing['sources'].append(source)
@@ -175,24 +178,11 @@ class Store:
 
     def rescan(self):
         with self.lock:
-            fresh, self.clients, self.errors = discover(self.home)
+            deleted_servers = self.data.get('deleted_servers', [])
+            fresh, self.clients, self.errors = discover(self.home, deleted_servers)
             def sources(server):
                 return {(v['client'], v['name']) for v in server.get('sources', [
                     {'client': server['source_client'], 'name': server.get('source_name', server['name'])}])}
-
-            def excluded(server):
-                config = server.get('definition', {'command': server.get('endpoint', '')})
-                if internal_server(server['name'], config) or internal_server(server.get('source_name', ''), config):
-                    return True
-                for cid, name in sources(server):
-                    if internal_server(name, {}): return True
-                    if cid not in CLIENTS: continue
-                    try:
-                        source = definitions(self.home, cid).get(name, {})
-                    except (ManagerError, OSError):
-                        continue
-                    if isinstance(source, dict) and internal_server(name, source): return True
-                return False
 
             def prior_identity(server):
                 if server.get('discovery_identity'): return server['discovery_identity']
@@ -217,17 +207,7 @@ class Store:
                     if lists: combined_rules[cid] = sorted(set.intersection(*lists))
                 server['tool_allowlists'] = combined_rules
 
-            def was_deleted(server):
-                for deleted in self.data.get('deleted_servers', []):
-                    old_sources = {(v['client'], v['name']) for v in deleted.get('sources', [])}
-                    if server['id'] == deleted['id'] or sources(server) & old_sources:
-                        return True
-                    if server.get('discovery_identity') in deleted.get('identities', []):
-                        return True
-                return False
-
-            fresh = [server for server in fresh if not was_deleted(server)]
-            history = [server for server in self.data['servers'] if not excluded(server)]
+            history = [server for server in self.data['servers'] if not was_deleted(server, deleted_servers)]
             old = {server['id']: server for server in history}
             merged = []
             for server in fresh:

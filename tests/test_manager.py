@@ -104,10 +104,10 @@ class CatalogTests(CatalogFixture, unittest.TestCase):
         self.assertEqual(local[0]['clients'], ['codex', 'cursor'])
         self.assertFalse(local[0]['enabled'])
 
-    def test_internal_servers_are_excluded_by_name_and_command_signature(self):
+    def test_discovery_treats_server_names_and_commands_equally(self):
         cursor = self.home / '.cursor/mcp.json'
         cursor.parent.mkdir()
-        ignored = {
+        configured = {
             'node_repl': {'command': '/bin/repl'},
             'node-repl': {'command': '/bin/repl2'},
             'Computer Use': {'url': 'https://internal.example/mcp'},
@@ -115,29 +115,46 @@ class CatalogTests(CatalogFixture, unittest.TestCase):
             'renamed-node': {'command': '/usr/bin/node', 'args': ['/bundle/node_repl/server.mjs']},
             'renamed-computer': {'command': '/bundle/unified-computer-use/bin/server'},
         }
-        cursor.write_text(json.dumps({'mcpServers': ignored}))
+        cursor.write_text(json.dumps({'mcpServers': configured}))
         original = cursor.read_bytes()
         servers, _, errors = m.discover(self.home)
-        self.assertEqual({s['name'] for s in servers}, {'logs', 'jira'})
+        self.assertEqual({s['name'] for s in servers}, {'logs', 'jira', *configured})
         self.assertEqual(errors, [])
         self.assertEqual(cursor.read_bytes(), original)
 
-    def test_rescan_removes_previously_cataloged_internal_servers(self):
+    def test_rescan_preserves_previously_cataloged_servers_regardless_of_name(self):
         store = m.Store(self.home / 'state', self.home)
         store.rescan()
         base = next(s for s in store.data['servers'] if s['name'] == 'jira')
         for index, (name, definition) in enumerate([
-            ('node_repl', None),
+            ('node_repl', {'command': '/bin/legacy-repl'}),
             ('Computer Use', {'url': 'https://internal.example/mcp'}),
             ('renamed-internal', {'command': '/usr/bin/node', 'args': ['/bundle/node-repl/server.mjs']}),
         ]):
             internal = copy.deepcopy(base)
             internal.update(id='internal-' + str(index), name=name, source_name=name, sources=[])
-            if definition: internal['definition'] = definition
+            internal.update(definition=definition, discovery_identity=m.discovery_identity(definition),
+                            endpoint=definition.get('url', definition.get('command')),
+                            transport='HTTP' if definition.get('url') else 'stdio')
             store.data['servers'].append(internal)
         store.rescan()
-        self.assertEqual({s['name'] for s in store.data['servers']}, {'logs', 'jira'})
-        self.assertNotIn('internal-', store.path.read_text())
+        self.assertEqual({s['name'] for s in store.data['servers']}, {'logs', 'jira', 'node_repl', 'Computer Use', 'renamed-internal'})
+
+    def test_saved_discovery_exclusion_does_not_hide_an_allowed_duplicate(self):
+        cursor = self.home / '.cursor/mcp.json'
+        cursor.parent.mkdir()
+        cursor.write_text(json.dumps({'mcpServers': {
+            'private-helper': {'command': '/bin/shared', 'args': ['private']},
+            'public-helper': {'command': '/bin/shared', 'args': ['public']},
+        }}))
+        store = m.Store(self.home / 'state', self.home)
+        store.data['deleted_servers'] = [{'id': 'removed-helper', 'sources': [{'client': 'cursor', 'name': 'private-helper'}]}]
+        store.rescan()
+        shared = [s for s in store.data['servers'] if s['endpoint'] == '/bin/shared']
+        self.assertEqual([s['name'] for s in shared], ['public-helper'])
+        self.assertEqual(shared[0]['sources'], [{'client': 'cursor', 'path': str(cursor), 'name': 'public-helper'}])
+        store.rescan()
+        self.assertEqual([s['name'] for s in store.data['servers'] if s['endpoint'] == '/bin/shared'], ['public-helper'])
 
     def test_rescan_consolidates_legacy_duplicates_with_restrictive_permissions(self):
         cursor = self.home / '.cursor/mcp.json'

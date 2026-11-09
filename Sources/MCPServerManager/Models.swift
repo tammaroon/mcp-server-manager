@@ -30,23 +30,16 @@ struct Server: Decodable, Identifiable {
     var oauth_status: String?
     var oauth_error: String?
     var supportsBrowserSignIn: Bool {
-        supported && transport == "HTTP" && (can_sign_in ?? name.localizedCaseInsensitiveContains("webex"))
+        supported && transport == "HTTP" && (can_sign_in ?? true)
     }
     var shouldOfferDropdownLogin: Bool {
         enabled && supportsBrowserSignIn && ["auth_required", "failed"].contains(status)
     }
     var glyph: String {
-        if name.contains("confluence") { return "doc.text" }
-        if name.contains("jira") { return "square.stack.3d.up" }
-        if name.contains("logs") { return "text.alignleft" }
-        if name.contains("webex") { return "video" }
-        if name.contains("computer") || name.contains("Chrome") { return "desktopcomputer" }
-        if name.contains("node") { return "terminal" }
         return transport == "HTTP" ? "globe" : "terminal"
     }
     var displayName: String {
-        let names = ["webexapis": "Webex APIs", "jira": "Jira", "confluence": "Confluence", "aiops-pilot": "AIOps Pilot", "computer-use": "Computer Use", "signal-desk-logs": "Signal Desk Logs"]
-        return names[name] ?? name
+        name
     }
     var statusLabel: String {
         switch status {

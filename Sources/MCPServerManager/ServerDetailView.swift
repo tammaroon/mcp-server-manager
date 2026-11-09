@@ -28,7 +28,7 @@ struct ServerDetailView: View {
                     HStack(spacing: 8) {
                         Button { model.check(server) } label: { Label("Check connection", systemImage: "arrow.clockwise") }.buttonStyle(SoftButtonStyle(primary: true)).disabled(model.busy || !server.enabled || !server.supported)
                         if canSignIn {
-                            Button { model.signIn(server) } label: { Label(server.name.localizedCaseInsensitiveContains("webex") ? "Open login screen" : "Sign in", systemImage: "person.crop.circle.badge.checkmark") }.buttonStyle(SoftButtonStyle(primary: server.status == "auth_required")).disabled(model.busy || server.oauth_status == "pending" || !server.enabled)
+                            Button { model.signIn(server) } label: { Label("Sign in", systemImage: "person.crop.circle.badge.checkmark") }.buttonStyle(SoftButtonStyle(primary: server.status == "auth_required")).disabled(model.busy || server.oauth_status == "pending" || !server.enabled)
                         }
                     }
                     if server.oauth_status == "pending" {
