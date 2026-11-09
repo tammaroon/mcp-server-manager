@@ -36,6 +36,12 @@ struct Server: Decodable, Identifiable {
         enabled && supportsBrowserSignIn && ["auth_required", "failed"].contains(status)
     }
     var glyph: String {
+        let label = name.lowercased()
+        if label.contains("confluence") { return "doc.text" }
+        if label.contains("jira") { return "square.stack.3d.up" }
+        if label.contains("logs") { return "text.alignleft" }
+        if label.contains("webex") { return "video" }
+        if label.contains("computer") || label.contains("chrome") { return "desktopcomputer" }
         return transport == "HTTP" ? "globe" : "terminal"
     }
     var displayName: String {
