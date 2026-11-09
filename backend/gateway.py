@@ -129,11 +129,11 @@ class Gateway:
             return copy.deepcopy(server)
 
     def start_configured_servers(self):
-        """Warm opted-in upstreams once per daemon launch; never execute tools."""
+        """Check every enabled upstream once per daemon launch; never execute tools."""
         ids = []
         with self.store.lock:
             for server in self.store.data['servers']:
-                if server['enabled'] and server['supported'] and raw_config(self.store, server).get('start_on_launch', False):
+                if server['enabled'] and server['supported']:
                     ids.append(server['id'])
         with ThreadPoolExecutor(max_workers=4) as pool:
             list(pool.map(self._check_after_login, ids))
@@ -143,6 +143,16 @@ class Gateway:
         with ThreadPoolExecutor(max_workers=4) as pool: list(pool.map(self.check, ids))
         self.last_checked = time.time()
         return self.snapshot()
+
+    def maintain_connections(self, stop, clock=time.monotonic):
+        last = clock()
+        while not stop.wait(10):
+            if self.closing.is_set(): return
+            interval = self.store.data['settings'].get('check_interval', 1800)
+            if interval and clock() - last >= interval:
+                try: self.check_all()
+                except (ManagerError, OSError): pass  # Retry next interval after a concurrent edit or removal.
+                last = clock()
 
     def snapshot(self):
         self._sync_common()
@@ -398,20 +408,16 @@ def run_daemon(state, home):
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
-    def maintenance():
-        last = time.monotonic()
-        while not stop.wait(10):
-            interval = store.data['settings'].get('check_interval', 0)
-            if interval and time.monotonic() - last >= interval:
-                gateway.check_all(); last = time.monotonic()
     startup = threading.Thread(target=gateway.start_configured_servers, daemon=True)
     startup.start()
-    threading.Thread(target=maintenance, daemon=True).start()
+    maintenance = threading.Thread(target=gateway.maintain_connections, args=(stop,), daemon=True)
+    maintenance.start()
     try: server.serve_forever(poll_interval=.1)
     finally:
         stop.set()
         gateway.close()
         startup.join()
+        maintenance.join()
         server.server_close()
         path.unlink(missing_ok=True)
         lockfile.close()

@@ -15,10 +15,10 @@ struct SettingsView: View {
                     }
                     Divider()
                     HStack {
-                        VStack(alignment: .leading, spacing: 5) { Text("Automatic connection checks").font(.system(size: 13, weight: .medium)); Text("Initialization and tool listing. Never a production query.").font(.system(size: 11)).foregroundStyle(Palette.muted) }
+                        VStack(alignment: .leading, spacing: 5) { Text("Automatic connection checks").font(.system(size: 13, weight: .medium)); Text("Checks at startup and at the chosen interval. No production queries.").font(.system(size: 11)).foregroundStyle(Palette.muted) }
                         Spacer()
-                        Picker("Cadence", selection: Binding(get: { model.snapshot?.settings.check_interval ?? 0 }, set: { model.perform("settings", values: ["check_interval": $0]) })) {
-                            Text("Manual only").tag(0); Text("Every 5 minutes").tag(300); Text("Every 15 minutes").tag(900); Text("Every 30 minutes").tag(1800); Text("Every hour").tag(3600)
+                        Picker("Cadence", selection: Binding(get: { model.snapshot?.settings.check_interval ?? 1800 }, set: { model.perform("settings", values: ["check_interval": $0]) })) {
+                            Text("Startup only").tag(0); Text("Every 5 minutes").tag(300); Text("Every 15 minutes").tag(900); Text("Every 30 minutes").tag(1800); Text("Every hour").tag(3600)
                         }.labelsHidden().frame(width: 160).disabled(model.busy)
                     }
                 }.padding(22).background(Palette.panel, in: RoundedRectangle(cornerRadius: 12))

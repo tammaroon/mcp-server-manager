@@ -36,11 +36,14 @@ def run():
                 time.sleep(.02)
             snapshot = rpc(state, {'action': 'snapshot'})
             sid = snapshot['servers'][0]['id']
-            assert snapshot['servers'][0]['status'] == 'not_checked'
-            assert not marker.exists(), 'Discovery launched an upstream'
-            checked = rpc(state, {'action': 'check', 'server_id': sid})
-            assert checked['servers'][0]['status'] == 'reachable'
-            assert 'tools/call' not in marker.read_text(), 'Health check ran a tool'
+            deadline = time.monotonic() + 8
+            while snapshot['servers'][0]['status'] == 'not_checked':
+                if time.monotonic() > deadline: raise TimeoutError('Startup check did not complete')
+                time.sleep(.02)
+                snapshot = rpc(state, {'action': 'snapshot'})
+            assert snapshot['servers'][0]['status'] == 'reachable'
+            assert snapshot['settings']['check_interval'] == 1800
+            assert marker.read_text().splitlines() == ['initialize', 'notifications/initialized', 'tools/list'], 'Startup check executed unexpected methods'
             review = rpc(state, {'action': 'preview', 'client': 'cursor'})
             applied = rpc(state, {'action': 'apply', 'client': 'cursor', 'digest': review['digest']})
             assert Path(applied['backup']).stat().st_mode & 0o777 == 0o600
@@ -67,7 +70,7 @@ def run():
             assert denied['error']['code'] == -32602
             daemon.terminate(); daemon.communicate(timeout=5)
             assert bridge.wait(timeout=3) != 0, 'Bridge did not exit on daemon loss'
-            print('PASS: packaged discovery → safe check → reviewed config + backup → real stdio bridge → namespaced tool call → immediate revocation → disconnect cleanup')
+            print('PASS: packaged discovery → automatic startup check → reviewed config + backup → real stdio bridge → namespaced tool call → immediate revocation → disconnect cleanup')
         finally:
             if bridge is not None:
                 if bridge.poll() is None: bridge.terminate()

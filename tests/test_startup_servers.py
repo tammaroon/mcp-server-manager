@@ -29,8 +29,7 @@ class StartupServerTests(unittest.TestCase):
         self.assertIn(self.server['id'],self.gateway.sessions)
         self.assertEqual(self.marker.read_text().splitlines(),['initialize','notifications/initialized','tools/list'])
         self.assertNotIn('start_on_launch',self.store.resolve(self.server))
-    def test_default_and_disabled_servers_are_not_launched(self):
-        self.gateway.start_configured_servers();self.assertFalse(self.marker.exists())
+    def test_disabled_servers_are_not_launched(self):
         self.configure(True);self.store.update(self.server['id'],{'enabled':False})
         self.gateway.start_configured_servers();self.assertFalse(self.marker.exists())
     def test_startup_flag_is_boolean(self):
@@ -54,3 +53,35 @@ class StartupServerTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertNotIn(self.server['id'],self.gateway.sessions)
         self.assertTrue(closed.is_set())
+
+    def test_startup_checks_enabled_servers_without_an_opt_in_flag(self):
+        self.gateway.start_configured_servers()
+        self.assertEqual(self.server['status'],'reachable')
+        self.assertEqual(self.marker.read_text().splitlines(),['initialize','notifications/initialized','tools/list'])
+
+    def test_new_install_defaults_to_30_minutes_and_existing_choice_is_preserved(self):
+        self.assertEqual(self.store.data['settings']['check_interval'],1800)
+        self.store.data['settings']['check_interval']=0;self.store.save()
+        self.assertEqual(Store(self.store.root,self.root).data['settings']['check_interval'],0)
+
+    def test_periodic_checks_repeat_every_30_minutes_without_tool_calls(self):
+        self.store.data['settings']['check_interval']=1800
+        clock=[0]
+        marker=self.marker
+        test=self
+        class StopAfterTwoIntervals:
+            def wait(self,seconds):
+                clock[0]+=seconds
+                if clock[0]<1800:test.assertFalse(marker.exists())
+                elif 1800<clock[0]<3600:test.assertEqual(len(marker.read_text().splitlines()),3)
+                return clock[0]>3600
+        self.gateway.maintain_connections(StopAfterTwoIntervals(),clock=lambda:clock[0])
+        self.assertEqual(marker.read_text().splitlines(),['initialize','notifications/initialized','tools/list']*2)
+
+    def test_startup_only_setting_skips_periodic_checks(self):
+        self.store.data['settings']['check_interval']=0
+        clock=[0]
+        class StopAfterOneHour:
+            def wait(self,seconds):clock[0]+=seconds;return clock[0]>3600
+        self.gateway.maintain_connections(StopAfterOneHour(),clock=lambda:clock[0])
+        self.assertFalse(self.marker.exists())

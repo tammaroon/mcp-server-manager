@@ -165,8 +165,9 @@ class Store:
         self.path = self.root / 'catalog.json'
         self.lock = threading.RLock()
         try:
-            self.data = json.loads(self.path.read_text()) if self.path.exists() else {'servers': [], 'settings': {'check_interval': 0}}
+            self.data = json.loads(self.path.read_text()) if self.path.exists() else {'servers': [], 'settings': {'check_interval': 1800}}
         except (OSError, ValueError): raise ManagerError('Catalog is unreadable; original file preserved.') from None
+        self.data.setdefault('settings', {}).setdefault('check_interval', 1800)
         self.clients, self.errors = [], []
 
     def save(self):

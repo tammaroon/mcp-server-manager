@@ -7,6 +7,7 @@ A central place to manage MCP servers on macOS. Configure your servers once and 
 - Choose which clients can access each server and its tools.
 - Use readable names such as `jira__search_issues`; stable numeric suffixes resolve naming collisions.
 - Keep connections handy from the menu bar, with optional startup at login.
+- Check enabled servers automatically on startup, then every 30 minutes by default. Change the interval in Settings.
 
 ## Screenshots
 
