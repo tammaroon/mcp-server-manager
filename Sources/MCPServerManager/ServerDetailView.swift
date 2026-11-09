@@ -24,13 +24,12 @@ struct ServerDetailView: View {
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { StatusPill(text: server.statusLabel, color: server.tint); Spacer(); Text(server.lastCheckText).font(.system(size: 10)).foregroundStyle(Palette.muted) }
-                    Text(server.diagnostic).font(.system(size: 11)).foregroundStyle(.white.opacity(0.72)).lineSpacing(4).textSelection(.enabled)
+                    Text(server.status == "reachable" ? "Connection successful." : server.diagnostic).font(.system(size: 11)).foregroundStyle(.white.opacity(0.72)).lineSpacing(4).textSelection(.enabled)
                     HStack(spacing: 8) {
                         Button { model.check(server) } label: { Label("Check connection", systemImage: "arrow.clockwise") }.buttonStyle(SoftButtonStyle(primary: true)).disabled(model.busy || !server.enabled || !server.supported)
                         if canSignIn {
                             Button { model.signIn(server) } label: { Label(server.name.localizedCaseInsensitiveContains("webex") ? "Open login screen" : "Sign in", systemImage: "person.crop.circle.badge.checkmark") }.buttonStyle(SoftButtonStyle(primary: server.status == "auth_required")).disabled(model.busy || server.oauth_status == "pending" || !server.enabled)
                         }
-                        if server.transport == "stdio" { Button { model.perform("restart", values: ["server_id": server.id], label: "Restarting upstream…") } label: { Image(systemName: "arrow.counterclockwise") }.buttonStyle(SoftButtonStyle()).help("Restart local connection").disabled(model.busy || !server.enabled || !server.supported) }
                     }
                     if server.oauth_status == "pending" {
                         HStack(spacing: 7) { ProgressView().controlSize(.mini); Text("Complete sign-in in your browser.").font(.system(size: 11)).foregroundStyle(Palette.muted) }
