@@ -26,8 +26,12 @@ from tool_names import ToolNames
 
 
 def socket_path(state):
-    identity = hashlib.sha256(str(Path(state).resolve()).encode()).hexdigest()[:12]
-    return Path('/tmp') / f'mcp-manager-{os.getuid()}-{identity}' / 'gateway.sock'
+    state = Path(state).resolve()
+    path = state / 'gateway.sock'
+    # macOS Unix socket addresses have a 104-byte limit, including the terminator.
+    if len(os.fsencode(path)) < 104: return path
+    identity = hashlib.sha256(str(state).encode()).hexdigest()[:12]
+    return Path.home() / '.mcp-server-manager' / f'{identity}.sock'
 
 
 class Gateway:

@@ -123,6 +123,24 @@ class GatewayTests(unittest.TestCase):
 
 
 class DaemonTests(unittest.TestCase):
+    def test_gateway_socket_is_kept_with_persistent_private_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            home, state = root / 'home', root / 'state'
+            home.mkdir()
+            daemon = subprocess.Popen([sys.executable, BACKEND, '--state', str(state), '--home', str(home), 'daemon'], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                deadline = time.monotonic() + 5
+                while not socket_path(state).exists() and time.monotonic() < deadline:
+                    if daemon.poll() is not None: self.fail('Fixture daemon exited before opening its socket')
+                    time.sleep(.025)
+                self.assertTrue(any(path.is_socket() for path in state.iterdir()), 'The gateway endpoint must survive cleanup of system temporary socket directories')
+                self.assertEqual(rpc(state, {'action': 'snapshot'})['daemon']['status'], 'reachable')
+                self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+            finally:
+                daemon.terminate()
+                daemon.communicate(timeout=5)
+
     def test_real_bridge_handshake_and_socket_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
