@@ -70,7 +70,12 @@ def run():
             assert denied['error']['code'] == -32602
             daemon.terminate(); daemon.communicate(timeout=5)
             assert bridge.wait(timeout=3) != 0, 'Bridge did not exit on daemon loss'
-            print('PASS: packaged discovery → automatic startup check → reviewed config + backup → real stdio bridge → namespaced tool call → immediate revocation → disconnect cleanup')
+            log = state / 'logs/manager.log'
+            records = [json.loads(line) for line in log.read_text().splitlines()]
+            assert {'daemon_listening', 'check_finished', 'bridge_connected', 'mcp_request', 'daemon_stopped'} <= {r['event'] for r in records}
+            assert log.stat().st_mode & 0o777 == 0o600
+            assert 'local fixture success' not in log.read_text(), 'Tool payload leaked to log'
+            print('PASS: packaged discovery → automatic startup check → reviewed config + backup → real stdio bridge → namespaced tool call → immediate revocation → disconnect cleanup → private event log')
         finally:
             if bridge is not None:
                 if bridge.poll() is None: bridge.terminate()

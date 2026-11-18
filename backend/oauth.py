@@ -16,6 +16,7 @@ import urllib.request
 from catalog import ManagerError
 from transport import deadline_opener
 from server_config import raw_config, resolve_config
+from event_log import EventLog
 
 
 def origin(url):
@@ -108,6 +109,7 @@ class ReplacedLogin(Exception):
 
 class OAuthManager:
     def __init__(self,store,read_secret,write_secret,on_changed):
+        self.log=EventLog(store.root)
         self.store,self.read_secret,self.write_secret,self.on_changed=store,read_secret,write_secret,on_changed
         self.pending={};self.lock=threading.RLock()
         for server in store.data['servers']:
@@ -195,6 +197,7 @@ class OAuthManager:
                     self.pending.pop(sid,None)
                 self._failed(server,'Sign-in timed out. Open the login screen to try again.');self._close_flow(flow)
             timer=threading.Timer(300,expire);timer.daemon=True;flow['timer']=timer;timer.start()
+            self.log.write('sign_in_started',server_id=sid,status='pending')
             return {'authorization_url':url}
         except Exception:
             http.server_close()
@@ -215,6 +218,7 @@ class OAuthManager:
                 raise ManagerError('The server endpoint changed during sign-in. Open the login screen again.')
             info={**metadata,'status':'authorized','error':None,'expires_at':bundle['expires_at']}
             self.write_secret('oauth:'+server['id'],json.dumps({**info,**bundle}))
+            self.log.write('oauth_credentials_updated',server_id=server['id'],status='authorized')
 
     def token(self,server):
         info=server.get('oauth',{})
@@ -243,6 +247,7 @@ class OAuthManager:
             raise ManagerError('Authentication required. Open the login screen to sign in again.') from None
 
     def _failed(self,server,message):
+        self.log.write('sign_in_failed',level='warning',server_id=server['id'],status='failed')
         with self.store.lock:
             try: server=self.store.server(server['id'])
             except ManagerError: return

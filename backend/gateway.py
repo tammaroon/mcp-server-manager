@@ -23,6 +23,7 @@ from common_config import CommonConfig
 from credentials import FileCredentials
 from server_config import raw_config
 from tool_names import ToolNames
+from event_log import EventLog
 
 
 def socket_path(state):
@@ -37,6 +38,7 @@ def socket_path(state):
 class Gateway:
     def __init__(self, store):
         self.store = store
+        self.log = EventLog(store.root)
         self.sessions = {}
         self.server_locks = {}
         self.lock = threading.RLock()
@@ -56,12 +58,16 @@ class Gateway:
             changed = self.common.sync()
             self.common_error = None
         except ManagerError as e:
+            if self.common_error != str(e): self.log.write('common_config_failed', level='error', error=e)
             self.common_error = str(e)
             if strict: raise
             return
-        for sid in changed: self.restart(sid)
+        for sid in changed:
+            self.log.write('server_config_changed', server_id=sid)
+            self.restart(sid)
 
     def _oauth_changed(self, sid):
+        self.log.write('sign_in_completed', server_id=sid)
         self.restart(sid)
         self._sync_common()
         # Release the browser callback while the upstream handshake runs.
@@ -90,12 +96,15 @@ class Gateway:
         entry = self.sessions.get(server['id'])
         if entry and entry['fingerprint'] == fingerprint: return entry
         self.restart(server['id'])
-        session = HTTPSession(config) if config.get('url') else StdioSession(config)
+        self.log.write('upstream_connecting', server_id=server['id'], transport=server['transport'])
+        session = None
         try:
+            session = HTTPSession(config) if config.get('url') else StdioSession(config)
             session.initialize()
             tools = session.tools()
-        except Exception:
-            session.close()
+        except Exception as e:
+            self.log.write('upstream_connection_failed', level='error', error=e, server_id=server['id'], transport=server['transport'])
+            if session is not None: session.close()
             raise
         supplied_credentials = bool(config.get('http_headers') or config.get('headers') or config.get('env_http_headers') or config.get('bearer_token_env_var'))
         entry = {'session': session, 'provided_credentials': supplied_credentials, 'fingerprint': fingerprint, 'tools': tools, 'last_used': time.monotonic()}
@@ -104,11 +113,14 @@ class Gateway:
                 session.close()
                 raise ManagerError('Gateway is shutting down.')
             self.sessions[server['id']] = entry
+        self.log.write('upstream_connected', server_id=server['id'], transport=server['transport'], count=len(tools))
         return entry
 
     def restart(self, sid):
         with self._server_lock(sid):
-            if entry := self.sessions.pop(sid, None): entry['session'].close()
+            if entry := self.sessions.pop(sid, None):
+                entry['session'].close()
+                self.log.write('upstream_disconnected', server_id=sid)
 
     def check(self, sid):
         with self._server_lock(sid):
@@ -117,6 +129,7 @@ class Gateway:
                 self.restart(sid)
                 return dict(server, status='disabled')
             start = time.monotonic()
+            self.log.write('check_started', server_id=sid, transport=server['transport'])
             try:
                 self.restart(sid)
                 entry = self._session(server)
@@ -127,9 +140,11 @@ class Gateway:
                 status = 'auth_required' if 'Authentication required' in message or 'credential' in message.lower() else ('unsupported' if not server['supported'] else 'failed')
                 server.update(status=status, diagnostic=redact(message), tools=[], identity=None)
                 if status == 'auth_required': server['auth'] = 'Authentication required'
+                self.log.write('check_failed', level='warning', error=e, server_id=sid, status=status)
             server.update(last_checked=time.time(), duration_ms=round((time.monotonic() - start) * 1000))
             self.last_checked = time.time()
             with self.store.lock: self.store.save()
+            self.log.write('check_finished', server_id=sid, status=server['status'], duration_ms=server['duration_ms'], count=len(server['tools']))
             return copy.deepcopy(server)
 
     def start_configured_servers(self):
@@ -140,7 +155,9 @@ class Gateway:
                 if server['enabled'] and server['supported']:
                     ids.append(server['id'])
         with ThreadPoolExecutor(max_workers=4) as pool:
+            self.log.write('startup_checks_started', count=len(ids))
             list(pool.map(self._check_after_login, ids))
+        self.log.write('startup_checks_finished', count=len(ids))
 
     def check_all(self):
         ids = [s['id'] for s in self.store.data['servers'] if s['enabled'] and s['supported']]
@@ -154,8 +171,10 @@ class Gateway:
             if self.closing.is_set(): return
             interval = self.store.data['settings'].get('check_interval', 1800)
             if interval and clock() - last >= interval:
+                self.log.write('scheduled_checks_started')
                 try: self.check_all()
-                except (ManagerError, OSError): pass  # Retry next interval after a concurrent edit or removal.
+                except (ManagerError, OSError) as e:
+                    self.log.write('scheduled_checks_failed', level='error', error=e)
                 last = clock()
 
     def snapshot(self):
@@ -180,6 +199,8 @@ class Gateway:
         rid = message.get('id')
         method = message.get('method')
         if 'id' not in message: return None
+        start = time.monotonic()
+        metadata = {}
         response = {'jsonrpc': '2.0', 'id': rid}
         try:
             if method in ('tools/list', 'tools/call'): self._sync_common(strict=True)
@@ -216,6 +237,7 @@ class Gateway:
                 route = self.names.resolve(name)
                 if route is None: raise ManagerError('Tool is unavailable or this client is not allowed to use it.')
                 sid, original = route
+                metadata['server_id'] = sid
                 with self._server_lock(sid):
                     try: server = self.store.server(sid)
                     except ManagerError: raise ManagerError('Tool is unavailable.') from None
@@ -223,6 +245,7 @@ class Gateway:
                     entry = self._session(server)
                     if not any(tool['name'] == original for tool in entry['tools']): raise ManagerError('Tool is unavailable.')
                     if not self._permitted(self.store.server(sid), client, original): raise ManagerError('Tool is unavailable or access was revoked.')
+                    metadata.update(server_id=sid, tool=name)
                     entry['session'].timeout = 60
                     try: result = entry['session'].request('tools/call', {'name': original, 'arguments': arguments})
                     except Exception:
@@ -235,7 +258,12 @@ class Gateway:
                 return response
             response['result'] = result
         except Exception as e:
+            self.log.write('mcp_request_failed', level='warning' if isinstance(e, ManagerError) else 'error', error=e, client=client, method=method, **metadata)
             response['error'] = {'code': -32602 if isinstance(e, ManagerError) else -32603, 'message': redact(str(e)) if isinstance(e, ManagerError) else 'Internal gateway error.'}
+        finally:
+            logged_result = response.get('result')
+            failed = 'error' in response or isinstance(logged_result, dict) and logged_result.get('isError') is True
+            self.log.write('mcp_request', client=client, method=method, status='error' if failed else 'ok', duration_ms=round((time.monotonic() - start) * 1000), **metadata)
         return response
 
     def bridge_command(self, client):
@@ -321,16 +349,21 @@ class Gateway:
 
 
 def rpc(state, request, timeout=120):
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(timeout)
-        sock.connect(str(socket_path(state)))
-        sock.sendall(json.dumps({'kind': 'control', 'request': request}).encode() + b'\n')
-        stream = sock.makefile('rb')
-        line = stream.readline(MAX_MESSAGE + 1)
-        if len(line) > MAX_MESSAGE: raise ManagerError('Gateway response exceeded limit.')
-        result = json.loads(line)
-        if not result.get('ok'): raise ManagerError(result.get('error', 'Gateway request failed.'))
-        return result['result']
+    path = socket_path(state)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(str(path))
+            sock.sendall(json.dumps({'kind': 'control', 'request': request}).encode() + b'\n')
+            stream = sock.makefile('rb')
+            line = stream.readline(MAX_MESSAGE + 1)
+            if len(line) > MAX_MESSAGE: raise ManagerError('Gateway response exceeded limit.')
+            result = json.loads(line)
+            if not result.get('ok'): raise ManagerError(result.get('error', 'Gateway request failed.'))
+            return result['result']
+    except Exception as e:
+        EventLog(state).write('rpc_failed', level='warning', error=e, socket=str(path), action=request.get('action') if isinstance(request, dict) else None)
+        raise
 
 
 class RequestHandler(socketserver.StreamRequestHandler):
@@ -347,14 +380,21 @@ class RequestHandler(socketserver.StreamRequestHandler):
             if len(first) > MAX_MESSAGE: return
             envelope = json.loads(first)
             if envelope.get('kind') == 'control':
-                try: result = {'ok': True, 'result': gateway.control(envelope['request'])}
-                except Exception as e: result = {'ok': False, 'error': redact(str(e)) if isinstance(e, ManagerError) else 'Request failed (' + type(e).__name__ + ').'}
+                request = None
+                try:
+                    request = envelope['request']
+                    result = {'ok': True, 'result': gateway.control(request)}
+                    if request.get('action') != 'snapshot': gateway.log.write('control_completed', action=request.get('action'))
+                except Exception as e:
+                    gateway.log.write('control_failed', level='error', error=e, action=request.get('action') if isinstance(request, dict) else None)
+                    result = {'ok': False, 'error': redact(str(e)) if isinstance(e, ManagerError) else 'Request failed (' + type(e).__name__ + ').'}
                 self.send(result)
                 return
             if envelope.get('kind') != 'bridge' or envelope.get('client') not in CLIENTS: return
             client = envelope['client']
             bridge_id = uuid.uuid4().hex
             with gateway.lock: gateway.bridges[bridge_id] = client
+            gateway.log.write('client_connected', client=client, bridge_id=bridge_id)
             self.connection.settimeout(None)
             initialized = False
             while True:
@@ -370,10 +410,12 @@ class RequestHandler(socketserver.StreamRequestHandler):
                         continue
                     if result := gateway.handle(client, message): self.send(result)
                 except (ValueError, UnicodeError): self.send({'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'Invalid JSON-RPC message.'}})
-        except (OSError, ValueError, UnicodeError, BrokenPipeError): pass
+        except (OSError, ValueError, UnicodeError, BrokenPipeError) as e:
+            gateway.log.write('client_connection_failed', level='warning', error=e)
         finally:
             if bridge_id:
                 with gateway.lock: gateway.bridges.pop(bridge_id, None)
+                gateway.log.write('client_disconnected', client=client, bridge_id=bridge_id)
 
     def send(self, obj):
         payload = json.dumps(obj, separators=(',', ':')).encode() + b'\n'
@@ -387,13 +429,21 @@ class UnixServer(socketserver.ThreadingUnixStreamServer):
     block_on_close = False
     request_queue_size = 32
 
+    def handle_error(self, request, client_address):
+        self.gateway.log.write('connection_handler_failed', level='error', error=sys.exc_info()[1])
+
 
 def run_daemon(state, home):
+    log = EventLog(state)
+    log.write('daemon_starting')
     store = Store(state, home)
     lockfile = open(store.root / 'daemon.lock', 'a')
     os.chmod(lockfile.name, 0o600)
     try: fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError: return
+    except BlockingIOError:
+        log.write('daemon_already_running')
+        lockfile.close()
+        return
     store.rescan()
     gateway = Gateway(store)
     path = socket_path(state)
@@ -406,6 +456,7 @@ def run_daemon(state, home):
     finally: os.umask(old_mask)
     server.gateway = gateway
     os.chmod(path, 0o600)
+    log.write('daemon_listening', socket=str(path), count=len(store.data['servers']))
     stop = threading.Event()
     def shutdown(*_):
         stop.set()
@@ -418,6 +469,7 @@ def run_daemon(state, home):
     maintenance.start()
     try: server.serve_forever(poll_interval=.1)
     finally:
+        log.write('daemon_stopping')
         stop.set()
         gateway.close()
         startup.join()
@@ -425,6 +477,7 @@ def run_daemon(state, home):
         server.server_close()
         path.unlink(missing_ok=True)
         lockfile.close()
+        log.write('daemon_stopped')
 
 
 def ensure_daemon(state, home):
@@ -432,6 +485,7 @@ def ensure_daemon(state, home):
     except (OSError, ValueError, ManagerError): pass
     # All launches coordinate via flock. A bridge can start the shared daemon when the UI is closed.
     command = [sys.executable, str(Path(__file__).with_name('manager.py')), '--state', str(state), '--home', str(home), 'daemon']
+    EventLog(state).write('daemon_launch_requested', socket=str(socket_path(state)))
     subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
@@ -441,9 +495,12 @@ def ensure_daemon(state, home):
 
 
 def run_bridge(state, client):
+    log = EventLog(state)
+    log.write('bridge_connecting', client=client, socket=str(socket_path(state)))
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.connect(str(socket_path(state)))
         sock.sendall(json.dumps({'kind': 'bridge', 'client': client}).encode() + b'\n')
+        log.write('bridge_connected', client=client)
         failed = threading.Event()
         input_closed = threading.Event()
         def receive():
@@ -452,8 +509,10 @@ def run_bridge(state, client):
                     while line := stream.readline(MAX_MESSAGE + 1):
                         if len(line) > MAX_MESSAGE: break
                         sys.stdout.buffer.write(line); sys.stdout.buffer.flush()
-            except (OSError, BrokenPipeError): pass
+            except (OSError, BrokenPipeError) as e:
+                log.write('bridge_receive_failed', level='warning', error=e, client=client)
             finally:
+                log.write('bridge_disconnected', level='info' if input_closed.is_set() else 'warning', client=client)
                 failed.set()
                 if not input_closed.is_set(): os._exit(1)
         reader = threading.Thread(target=receive, daemon=True)

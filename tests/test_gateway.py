@@ -1,6 +1,7 @@
 import json
 import copy
 import os
+import socket
 from pathlib import Path
 import subprocess
 import sys
@@ -154,6 +155,13 @@ class DaemonTests(unittest.TestCase):
                 snap = rpc(state, {'action': 'snapshot'})
                 self.assertEqual(snap['servers'], [])
                 self.assertEqual(socket_path(state).stat().st_mode & 0o777, 0o600)
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                    connection.settimeout(2)
+                    connection.connect(str(socket_path(state)))
+                    connection.sendall(b'{"kind":"control"}\n')
+                    with connection.makefile('rb') as stream: line = stream.readline()
+                    self.assertTrue(line, 'Malformed control requests must receive a JSON error response')
+                    self.assertFalse(json.loads(line)['ok'])
                 message = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-11-25'}}) + '\n'
                 bridge = subprocess.run([sys.executable, BACKEND, '--state', str(state), 'bridge', '--client', 'codex'], input=message, text=True, capture_output=True, timeout=5)
                 self.assertEqual(bridge.returncode, 0, bridge.stderr)

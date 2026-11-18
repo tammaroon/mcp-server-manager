@@ -34,6 +34,12 @@ Discover or add servers, then connect your apps from **Agent clients**. Restart 
 
 The shared configuration lives at `~/Library/Application Support/MCP Server Manager/mcp.json`. Credentials are stored directly in each server entry with owner-only file permissions; Keychain is not used.
 
+Logs are saved to `~/Library/Application Support/MCP Server Manager/logs/manager.log` as timestamped JSON lines. They cover gateway and bridge connections, health checks, sign-in, and request outcomes. Rotation keeps one active file and three backups, each up to 2 MB. Logs have owner-only permissions and omit credentials, MCP arguments/results, and raw upstream output or exception messages.
+
+```sh
+tail -F "$HOME/Library/Application Support/MCP Server Manager/logs/manager.log"
+```
+
 ## Development
 
 ```sh
